@@ -1,0 +1,3 @@
+git+https://github.com/CrystalEye42/OpenChemIE
+pillow==9.5.0
+boto3

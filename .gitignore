@@ -130,3 +130,10 @@ dmypy.json
 
 
 chemescribe/reaction_model/output
+
+.cadence
+OpenChemIE.egg-info/
+venv
+.idea
+
+*.pdf
