@@ -1,7 +1,10 @@
+import base64
 import json
 import os
 import shutil
 import sys
+import time
+from io import BytesIO
 
 import boto3
 import requests
@@ -38,18 +41,40 @@ def download_from_url(url):
         return f.name
 
 
-pdf_path = download_from_url(test_url)
-model = OpenChemIE(device=torch.device('cuda'))  # change to cuda for gpu
-# TODO this needs to be a small enough pdf where the reactions will fit into memory. Shouldnt be a problem
+print('downloading pdf from {}'.format(test_url))
+if test_url.startswith("s3://"):
+    pdf_path = download_from_s3(test_url)
+elif test_url.startswith('http://') or test_url.startswith('https://'):
+    pdf_path = download_from_url(test_url)
+else:
+    raise ValueError("Invalid URL: {}".format(test_url))
+print('done downloading file')
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model = OpenChemIE(device=torch.device(device))
+print('extracting reactions from pdf')
+start_time = time.time()
+# watch out! pdf and results should be small enough to fit into memory
 extracted_results = model.extract_reactions_from_pdf(pdf_path)
-print(extracted_results)
+end_time = time.time()
+print(f'extracting reactions from pdf in {end_time - start_time} seconds')
+
+# go through the figures and change the PIL images to base64 encoded strings
+for figure in extracted_results['figures']:
+    buffered = BytesIO()
+    figure['figure'].save(buffered, format="JPEG")
+    img_str = base64.b64encode(buffered.getvalue())
+    figure['figure'] = img_str.decode('utf-8')
 
 # get the bucket from s3_dest
 bucket, prefix = s3_dest.replace("s3://", "").split("/", 1)
-file_name_no_ext = os.path.basename(pdf_path).split('.')[0]
-upload_key = f'{prefix}/{file_name_no_ext}.json'
-s3.put_object(Body=json.dumps(extracted_results).encode(), Bucket=bucket, Key=upload_key)
+# normalize the prefix to make sure it ends with a '/'
+prefix = prefix if prefix.endswith("/") else prefix + "/"
 
+file_name_no_ext = os.path.basename(pdf_path).split('.')[0]
+upload_key = f'{prefix}{file_name_no_ext}.json'
+print(f'saving extracted results to s3://{bucket}/{upload_key}')
+s3.put_object(Body=json.dumps(extracted_results).encode(), Bucket=bucket, Key=upload_key)
+print(f'Done!')
 """
         Returns:
             dictionary of reactions from multimodal sources
